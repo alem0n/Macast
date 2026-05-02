@@ -13,12 +13,17 @@ const ERROR_MESSAGES: Record<number, string> = {
 const TAG = '[VideoEvents]';
 const LOAD_TIMEOUT_MS = 15000;
 
-export function useVideoEvents(videoRef: React.RefObject<HTMLVideoElement | null>): {
+export function useVideoEvents(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  onEnded?: () => void,
+): {
   isDraggingRef: React.MutableRefObject<boolean>;
 } {
   const dispatch = useDispatch();
   const mediaUrl = useSelector((s: RootState) => s.player.media?.url);
   const isDraggingRef = useRef(false);
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -68,9 +73,10 @@ export function useVideoEvents(videoRef: React.RefObject<HTMLVideoElement | null
       }
     };
 
-    const onEnded = () => {
+    const onEndedHandler = () => {
       console.log(`${TAG} ended`);
       dispatch(setStatus('idle'));
+      onEndedRef.current?.();
     };
 
     const onTimeUpdate = () => {
@@ -109,7 +115,7 @@ export function useVideoEvents(videoRef: React.RefObject<HTMLVideoElement | null
     video.addEventListener('playing', onPlaying);
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
-    video.addEventListener('ended', onEnded);
+    video.addEventListener('ended', onEndedHandler);
     video.addEventListener('timeupdate', onTimeUpdate);
     video.addEventListener('durationchange', onDurationChange);
     video.addEventListener('progress', onProgress);
@@ -123,7 +129,7 @@ export function useVideoEvents(videoRef: React.RefObject<HTMLVideoElement | null
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('play', onPlay);
       video.removeEventListener('pause', onPause);
-      video.removeEventListener('ended', onEnded);
+      video.removeEventListener('ended', onEndedHandler);
       video.removeEventListener('timeupdate', onTimeUpdate);
       video.removeEventListener('durationchange', onDurationChange);
       video.removeEventListener('progress', onProgress);

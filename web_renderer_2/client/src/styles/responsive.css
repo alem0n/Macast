@@ -17,10 +17,6 @@
     padding: 0 var(--spacing-sm);
   }
 
-  .volume-slider {
-    width: 60px;
-  }
-
   .media-info {
     display: none;
   }
@@ -60,10 +56,6 @@
     height: 40px;
     padding: 0 var(--spacing-xs);
     justify-content: space-between;
-  }
-
-  .volume-slider {
-    display: none;
   }
 
   .time-display {
@@ -126,10 +118,6 @@
   .player-fullscreen .control-btn {
     width: 32px;
     height: 32px;
-  }
-
-  .player-fullscreen .volume-slider {
-    width: 60px;
   }
 
   .player-fullscreen .progress-bar-container {

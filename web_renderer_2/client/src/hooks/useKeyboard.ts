@@ -4,8 +4,6 @@ import { RootState } from '../store';
 import {
   togglePlay,
   seek,
-  setVolume,
-  toggleMute,
   setFullscreen,
 } from '../store/playerSlice';
 
@@ -14,7 +12,6 @@ export function useKeyboard(): void {
   const media = useSelector((s: RootState) => s.player.media);
   const currentTime = useSelector((s: RootState) => s.player.currentTime);
   const duration = useSelector((s: RootState) => s.player.duration);
-  const volume = useSelector((s: RootState) => s.player.volume);
   const isFullscreen = useSelector((s: RootState) => s.player.isFullscreen);
 
   useEffect(() => {
@@ -41,22 +38,6 @@ export function useKeyboard(): void {
           dispatch(seek(Math.min(duration, currentTime + 5)));
           break;
 
-        case 'ArrowUp':
-          e.preventDefault();
-          dispatch(setVolume(Math.min(100, volume + 5)));
-          break;
-
-        case 'ArrowDown':
-          e.preventDefault();
-          dispatch(setVolume(Math.max(0, volume - 5)));
-          break;
-
-        case 'm':
-        case 'M':
-          e.preventDefault();
-          dispatch(toggleMute());
-          break;
-
         case 'f':
         case 'F':
           e.preventDefault();
@@ -76,5 +57,5 @@ export function useKeyboard(): void {
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [dispatch, media, currentTime, duration, volume, isFullscreen]);
+  }, [dispatch, media, currentTime, duration, isFullscreen]);
 }

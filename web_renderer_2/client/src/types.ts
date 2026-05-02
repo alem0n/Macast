@@ -19,8 +19,6 @@ export interface PlayerStatus {
   state: 'idle' | 'loading' | 'playing' | 'paused' | 'error';
   currentTime: number;
   duration: number;
-  volume: number;
-  muted: boolean;
   error: string | null;
 }
 

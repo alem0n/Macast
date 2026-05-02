@@ -6,8 +6,6 @@ interface PlayerState {
   status: 'idle' | 'loading' | 'playing' | 'paused' | 'error';
   currentTime: number;
   duration: number;
-  volume: number;
-  muted: boolean;
   isFullscreen: boolean;
   error: string | null;
   buffered: number;
@@ -18,8 +16,6 @@ const initialState: PlayerState = {
   status: 'idle',
   currentTime: 0,
   duration: 0,
-  volume: 100,
-  muted: false,
   isFullscreen: false,
   error: null,
   buffered: 0,
@@ -60,14 +56,6 @@ const playerSlice = createSlice({
 
     seek(state, action: PayloadAction<number>) {
       state.currentTime = Math.max(0, Math.min(action.payload, state.duration));
-    },
-
-    setVolume(state, action: PayloadAction<number>) {
-      state.volume = Math.max(0, Math.min(100, action.payload));
-    },
-
-    toggleMute(state) {
-      state.muted = !state.muted;
     },
 
     updateTime(state, action: PayloadAction<number>) {
@@ -111,8 +99,6 @@ export const {
   pause,
   togglePlay,
   seek,
-  setVolume,
-  toggleMute,
   updateTime,
   setDuration,
   setBuffered,

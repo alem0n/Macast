@@ -2,8 +2,10 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import { useVideoEvents } from '../../hooks/useVideoEvents';
+import { usePlaylistNavigation } from '../../hooks/usePlaylistNavigation';
 import PlayerControls from './PlayerControls';
 import StatusOverlay from '../StatusOverlay';
+import Toast from '../Toast';
 
 const CONTROLS_HIDE_DELAY = 3000;
 
@@ -17,7 +19,27 @@ const VideoPlayer: React.FC = () => {
   const status = useSelector((s: RootState) => s.player.status);
   const isFullscreen = useSelector((s: RootState) => s.player.isFullscreen);
 
-  const { isDraggingRef } = useVideoEvents(videoRef);
+  const { goNext } = usePlaylistNavigation();
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    setToastVisible(true);
+  }, []);
+
+  const hideToast = useCallback(() => {
+    setToastVisible(false);
+  }, []);
+
+  const handleEnded = useCallback(async () => {
+    const success = await goNext();
+    if (!success) {
+      showToast('已到达最后一个视频');
+    }
+  }, [goNext, showToast]);
+
+  const { isDraggingRef } = useVideoEvents(videoRef, handleEnded);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -45,9 +67,6 @@ const VideoPlayer: React.FC = () => {
       });
     }
   }, [media?.url]);
-
-  // Orientation lock is handled directly in FullscreenButton
-  // to ensure it's within a user gesture context
 
   // Disable context menu on fullscreen video
   useEffect(() => {
@@ -96,6 +115,12 @@ const VideoPlayer: React.FC = () => {
           visible={showControlsBar}
         />
       )}
+
+      <Toast
+        message={toastMessage}
+        visible={toastVisible}
+        onClose={hideToast}
+      />
     </div>
   );
 };
