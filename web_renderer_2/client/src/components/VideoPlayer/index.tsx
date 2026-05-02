@@ -27,7 +27,7 @@ const VideoPlayer: React.FC = () => {
   const status = useSelector((s: RootState) => s.player.status);
   const isFullscreen = useSelector((s: RootState) => s.player.isFullscreen);
 
-  const { goNext, goPrev, navLoading } = usePlaylistNavigation();
+  const { goNext } = usePlaylistNavigation();
   const [toastMessage, setToastMessage] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
 
@@ -71,19 +71,6 @@ const VideoPlayer: React.FC = () => {
     dispatch(togglePlay());
   }, [dispatch, status, videoRef, media]);
 
-  const handleSwipeLeft = useCallback(async () => {
-    if (navLoading) return;
-    const success = await goNext();
-    if (!success) {
-      showToast('已到达最后一个视频');
-    }
-  }, [goNext, navLoading, showToast]);
-
-  const handleSwipeRight = useCallback(async () => {
-    if (navLoading) return;
-    await goPrev();
-  }, [goPrev, navLoading]);
-
   // Snapshots controls visibility and shows them on every touch.
   // The snapshot is consumed by handleSingleTap to decide whether
   // to toggle playback or only reveal controls.
@@ -100,8 +87,6 @@ const VideoPlayer: React.FC = () => {
     containerRef,
     callbacks: {
       onSingleTap: handleSingleTap,
-      onSwipeLeft: handleSwipeLeft,
-      onSwipeRight: handleSwipeRight,
       onTouchStart: handleTouchStart,
     },
   });

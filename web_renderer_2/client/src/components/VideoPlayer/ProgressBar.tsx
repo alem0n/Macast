@@ -27,6 +27,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ videoRef, isDraggingRef }) =>
   const buffered = useSelector((s: RootState) => s.player.buffered);
 
   const [dragTime, setDragTime] = useState<number | null>(null);
+  const [isTouchDragging, setIsTouchDragging] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
 
   const displayTime = dragTime ?? currentTime;
@@ -34,7 +35,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ videoRef, isDraggingRef }) =>
   const bufferedPercent = buffered * 100;
 
   const calcTimeFromEvent = useCallback(
-    (e: React.MouseEvent | MouseEvent): number => {
+    (e: { clientX: number }): number => {
       const bar = barRef.current;
       if (!bar || duration <= 0) return 0;
       const rect = bar.getBoundingClientRect();
@@ -75,14 +76,55 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ videoRef, isDraggingRef }) =>
     [calcTimeFromEvent, dispatch, videoRef, isDraggingRef]
   );
 
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length !== 1) return;
+
+      isDraggingRef.current = true;
+      setIsTouchDragging(true);
+      const t = calcTimeFromEvent(e.touches[0]);
+      setDragTime(t);
+
+      const onTouchMove = (ev: TouchEvent) => {
+        if (ev.touches.length !== 1) return;
+        ev.preventDefault();
+        setDragTime(calcTimeFromEvent(ev.touches[0]));
+      };
+
+      const onTouchEnd = (ev: TouchEvent) => {
+        isDraggingRef.current = false;
+        setIsTouchDragging(false);
+        const touch = ev.changedTouches[0];
+        const finalTime = calcTimeFromEvent(touch);
+        setDragTime(null);
+
+        const video = videoRef.current;
+        if (video) {
+          video.currentTime = finalTime;
+        }
+        dispatch(seek(finalTime));
+
+        document.removeEventListener('touchmove', onTouchMove);
+        document.removeEventListener('touchend', onTouchEnd);
+        document.removeEventListener('touchcancel', onTouchEnd);
+      };
+
+      document.addEventListener('touchmove', onTouchMove, { passive: false });
+      document.addEventListener('touchend', onTouchEnd);
+      document.addEventListener('touchcancel', onTouchEnd);
+    },
+    [calcTimeFromEvent, dispatch, videoRef, isDraggingRef]
+  );
+
   return (
     <div className="progress-bar-container">
       <span className="time-display time-current">{formatTime(displayTime)}</span>
 
       <div
-        className="progress-bar"
+        className={`progress-bar${isTouchDragging ? ' progress-dragging' : ''}`}
         ref={barRef}
         onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
         role="slider"
         aria-label="播放进度"
         aria-valuemin={0}

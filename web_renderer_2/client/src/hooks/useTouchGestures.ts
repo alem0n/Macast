@@ -2,8 +2,6 @@ import { useEffect, useRef } from 'react';
 
 interface TouchGestureCallbacks {
   onSingleTap: () => void;
-  onSwipeLeft: () => void;
-  onSwipeRight: () => void;
   onTouchStart?: () => void;
 }
 
@@ -13,7 +11,6 @@ interface UseTouchGesturesOptions {
 }
 
 const TAP_TIMEOUT = 300;
-const SWIPE_THRESHOLD = 60;
 const TAP_MOVEMENT_THRESHOLD = 10;
 
 export function useTouchGestures({ containerRef, callbacks }: UseTouchGesturesOptions): void {
@@ -46,21 +43,9 @@ export function useTouchGestures({ containerRef, callbacks }: UseTouchGesturesOp
       const dx = touch.clientX - startX;
       const dy = touch.clientY - startY;
       const dt = Date.now() - startTime;
-      const absDx = Math.abs(dx);
-      const absDy = Math.abs(dy);
 
-      // Horizontal swipe
-      if (absDx > SWIPE_THRESHOLD && absDx > absDy * 1.5 && dt < 500) {
-        if (dx < 0) {
-          cbRef.current.onSwipeLeft();
-        } else {
-          cbRef.current.onSwipeRight();
-        }
-        return;
-      }
-
-      // Single tap — short duration, minimal movement, immediate response
-      if (dt < TAP_TIMEOUT && absDx < TAP_MOVEMENT_THRESHOLD && absDy < TAP_MOVEMENT_THRESHOLD) {
+      // Single tap — short duration, minimal movement
+      if (dt < TAP_TIMEOUT && Math.abs(dx) < TAP_MOVEMENT_THRESHOLD && Math.abs(dy) < TAP_MOVEMENT_THRESHOLD) {
         cbRef.current.onSingleTap();
       }
     };

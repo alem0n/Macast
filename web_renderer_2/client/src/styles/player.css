@@ -199,6 +199,16 @@
   box-shadow: 0 0 0 4px rgba(64, 158, 255, 0.4);
 }
 
+/* Touch dragging state — same visual feedback as :active for mobile */
+.progress-bar.progress-dragging .progress-thumb {
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgba(64, 158, 255, 0.4);
+}
+
+.progress-bar.progress-dragging .progress-track {
+  height: 6px;
+}
+
 /* === Prev / Next buttons === */
 .prev-btn:disabled,
 .next-btn:disabled {
