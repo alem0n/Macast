@@ -2,8 +2,6 @@ import { useEffect, useRef } from 'react';
 
 interface TouchGestureCallbacks {
   onSingleTap: () => void;
-  onDoubleTapLeft: (x: number, y: number) => void;
-  onDoubleTapRight: (x: number, y: number) => void;
   onSwipeLeft: () => void;
   onSwipeRight: () => void;
   onTouchStart?: () => void;
@@ -15,7 +13,6 @@ interface UseTouchGesturesOptions {
 }
 
 const TAP_TIMEOUT = 300;
-const DOUBLE_TAP_DELAY = 300;
 const SWIPE_THRESHOLD = 60;
 const TAP_MOVEMENT_THRESHOLD = 10;
 
@@ -30,9 +27,6 @@ export function useTouchGestures({ containerRef, callbacks }: UseTouchGesturesOp
     let startX = 0;
     let startY = 0;
     let startTime = 0;
-    let lastTapTime = 0;
-    let lastTapX = 0;
-    let tapTimer: ReturnType<typeof setTimeout>;
 
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
@@ -44,7 +38,7 @@ export function useTouchGestures({ containerRef, callbacks }: UseTouchGesturesOp
     };
 
     const onTouchEnd = (e: TouchEvent) => {
-      // Ignore taps on control buttons / progress bar
+      // Ignore touches on control buttons / progress bar
       const target = e.target as HTMLElement;
       if (target.closest('.player-controls')) return;
 
@@ -65,28 +59,9 @@ export function useTouchGestures({ containerRef, callbacks }: UseTouchGesturesOp
         return;
       }
 
-      // Tap — short duration, minimal movement
+      // Single tap — short duration, minimal movement, immediate response
       if (dt < TAP_TIMEOUT && absDx < TAP_MOVEMENT_THRESHOLD && absDy < TAP_MOVEMENT_THRESHOLD) {
-        const now = Date.now();
-        const rect = el.getBoundingClientRect();
-        const isLeftHalf = (touch.clientX - rect.left) < rect.width / 2;
-
-        if (now - lastTapTime < DOUBLE_TAP_DELAY && Math.abs(touch.clientX - lastTapX) < 40) {
-          clearTimeout(tapTimer);
-          if (isLeftHalf) {
-            cbRef.current.onDoubleTapLeft(touch.clientX, touch.clientY);
-          } else {
-            cbRef.current.onDoubleTapRight(touch.clientX, touch.clientY);
-          }
-          lastTapTime = 0;
-        } else {
-          clearTimeout(tapTimer);
-          tapTimer = setTimeout(() => {
-            cbRef.current.onSingleTap();
-          }, DOUBLE_TAP_DELAY);
-          lastTapTime = now;
-          lastTapX = touch.clientX;
-        }
+        cbRef.current.onSingleTap();
       }
     };
 
@@ -94,7 +69,6 @@ export function useTouchGestures({ containerRef, callbacks }: UseTouchGesturesOp
     el.addEventListener('touchend', onTouchEnd, { passive: true });
 
     return () => {
-      clearTimeout(tapTimer);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchend', onTouchEnd);
     };

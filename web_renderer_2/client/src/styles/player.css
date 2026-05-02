@@ -255,55 +255,6 @@
   }
 }
 
-/* === Seek hint (double-tap feedback on touch devices) === */
-.seek-hint {
-  position: fixed;
-  transform: translate(-50%, -50%);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 14px;
-  font-weight: 600;
-  pointer-events: none;
-  z-index: 100;
-  animation: seek-hint-pop 0.6s ease forwards;
-  white-space: nowrap;
-}
-
-.seek-hint-icon {
-  font-size: 12px;
-}
-
-.seek-hint-left {
-  /* arrow is already ◀ */
-}
-
-.seek-hint-right {
-  /* arrow is already ▶ */
-}
-
-@keyframes seek-hint-pop {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.6);
-  }
-  20% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1.15);
-  }
-  40% {
-    transform: translate(-50%, -50%) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.8);
-  }
-}
-
 /* === Fullscreen button === */
 .fullscreen-btn svg {
   transition: transform var(--transition-fast);

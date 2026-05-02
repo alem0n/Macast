@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../../store';
-import { togglePlay, seek } from '../../store/playerSlice';
+import { togglePlay } from '../../store/playerSlice';
 import { useVideoEvents } from '../../hooks/useVideoEvents';
 import { usePlaylistNavigation } from '../../hooks/usePlaylistNavigation';
 import { useKeyboard } from '../../hooks/useKeyboard';
@@ -11,7 +11,6 @@ import StatusOverlay from '../StatusOverlay';
 import Toast from '../Toast';
 
 const CONTROLS_HIDE_DELAY = 3000;
-const SEEK_STEP = 10;
 
 const VideoPlayer: React.FC = () => {
   const dispatch = useDispatch();
@@ -23,17 +22,10 @@ const VideoPlayer: React.FC = () => {
   const media = useSelector((s: RootState) => s.player.media);
   const status = useSelector((s: RootState) => s.player.status);
   const isFullscreen = useSelector((s: RootState) => s.player.isFullscreen);
-  const currentTime = useSelector((s: RootState) => s.player.currentTime);
-  const duration = useSelector((s: RootState) => s.player.duration);
 
   const { goNext, goPrev, navLoading } = usePlaylistNavigation();
   const [toastMessage, setToastMessage] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
-  const [seekHint, setSeekHint] = useState<{
-    side: 'left' | 'right';
-    x: number;
-    y: number;
-  } | null>(null);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -68,26 +60,6 @@ const VideoPlayer: React.FC = () => {
     dispatch(togglePlay());
   }, [dispatch, status, videoRef, media]);
 
-  const handleDoubleTapLeft = useCallback((x: number, y: number) => {
-    const video = videoRef.current;
-    if (!video || !media) return;
-    const t = Math.max(0, currentTime - SEEK_STEP);
-    video.currentTime = t;
-    dispatch(seek(t));
-    setSeekHint({ side: 'left', x, y });
-    setTimeout(() => setSeekHint(null), 600);
-  }, [dispatch, currentTime, videoRef, media]);
-
-  const handleDoubleTapRight = useCallback((x: number, y: number) => {
-    const video = videoRef.current;
-    if (!video || !media) return;
-    const t = Math.min(duration || Infinity, currentTime + SEEK_STEP);
-    video.currentTime = t;
-    dispatch(seek(t));
-    setSeekHint({ side: 'right', x, y });
-    setTimeout(() => setSeekHint(null), 600);
-  }, [dispatch, currentTime, duration, videoRef, media]);
-
   const handleSwipeLeft = useCallback(async () => {
     if (navLoading) return;
     const success = await goNext();
@@ -114,8 +86,6 @@ const VideoPlayer: React.FC = () => {
     containerRef,
     callbacks: {
       onSingleTap: handleSingleTap,
-      onDoubleTapLeft: handleDoubleTapLeft,
-      onDoubleTapRight: handleDoubleTapRight,
       onSwipeLeft: handleSwipeLeft,
       onSwipeRight: handleSwipeRight,
       onTouchStart: handleTouchStart,
@@ -202,15 +172,6 @@ const VideoPlayer: React.FC = () => {
         onClose={hideToast}
       />
 
-      {seekHint && (
-        <div
-          className={`seek-hint seek-hint-${seekHint.side}`}
-          style={{ left: seekHint.x, top: seekHint.y }}
-        >
-          <span className="seek-hint-icon">{seekHint.side === 'left' ? '◀' : '▶'}</span>
-          <span>{SEEK_STEP}s</span>
-        </div>
-      )}
     </div>
   );
 };
