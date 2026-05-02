@@ -8,28 +8,83 @@
     dependencies, compiles translations, and bundles everything with PyInstaller.
     The resulting exe includes mpv and is ready for distribution.
 
+    With -WithWebRenderer, also builds the Web Renderer 2 subproject
+    (Node.js server + React client) and bundles it into the exe.
+
 .PARAMETER Clean
     Remove build/dist/Macast.spec before building (default: true).
 
 .PARAMETER SkipMpv
     Build without bundling mpv (smaller exe, but mpv must be installed separately).
 
+.PARAMETER WithWebRenderer
+    Build and bundle the Web Renderer 2 subproject. Requires Node.js >= 18 and npm.
+    The bundled app is auto-extracted to the Macast settings directory on first run.
+
 .EXAMPLE
     .\build.ps1
     .\build.ps1 -Clean:$false
     .\build.ps1 -SkipMpv
+    .\build.ps1 -WithWebRenderer
+    .\build.ps1 -SkipMpv -WithWebRenderer
 #>
 
 param(
     [bool]$Clean = $true,
-    [switch]$SkipMpv
+    [switch]$SkipMpv,
+    [switch]$WithWebRenderer,
+    [switch]$Help
 )
+
+if ($Help) {
+    Write-Host @"
+Macast Build Script — build.ps1
+
+Build Macast into a standalone Windows executable (dist/Macast.exe).
+
+USAGE:
+  .\build.ps1 [OPTIONS]
+
+OPTIONS:
+  -Clean <bool>        Remove build/dist/Macast.spec before building.
+                       Default: true.  Use -Clean:`$false to skip.
+
+  -SkipMpv             Build without bundling mpv.exe.
+                       The resulting exe is smaller (~24 MB vs ~68 MB)
+                       but mpv must be installed separately on the
+                       target machine.
+
+  -WithWebRenderer     Build and bundle the Web Renderer 2 subproject.
+                       Requires Node.js >= 18 and npm.
+                       Builds the React client (Vite) and Express server
+                       (TypeScript), then bundles everything into the exe.
+                       On first run, the app auto-extracts to:
+                         `%LOCALAPPDATA%\xfangfang\Macast\web_renderer_2_app\`
+
+  -Help                Show this help and exit.
+
+EXAMPLES:
+  .\build.ps1                          Clean build with mpv
+  .\build.ps1 -Clean:`$false           Rebuild without cleaning
+  .\build.ps1 -SkipMpv                 Build without mpv
+  .\build.ps1 -WithWebRenderer         Build with Web Renderer 2 bundled
+  .\build.ps1 -SkipMpv -WithWebRenderer  Combined flags
+
+OUTPUT:
+  dist/Macast.exe      Standalone executable, ready for distribution.
+"@
+    exit 0
+}
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot
 $VenvDir = Join-Path $ProjectRoot ".venv"
 $BinDir = Join-Path $ProjectRoot "bin"
 $MpvExe = Join-Path $BinDir "mpv.exe"
+$WebRendererDir = Join-Path $ProjectRoot "web_renderer_2"
+$WebRendererClientDir = Join-Path $WebRendererDir "client"
+$WebRendererServerDir = Join-Path $WebRendererDir "server"
+$StagingDir = Join-Path $WebRendererDir "staging"
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -118,6 +173,58 @@ for lang in ['zh_CN', 'fi', 'it']:
     print(f'  compiled: {lang}')
 "@
 
+# ── web renderer 2 ───────────────────────────────────────────────────
+
+if ($WithWebRenderer) {
+    Ensure-Command node
+    Ensure-Command npm
+
+    $nodeVer = & node --version
+    Write-Host "[ok] Node.js $nodeVer detected" -ForegroundColor Green
+
+    # Build client
+    Write-Step "Building Web Renderer 2 client (Vite + React)..."
+    Push-Location $WebRendererClientDir
+    try {
+        if (-not (Test-Path "node_modules")) {
+            Write-Host "  Installing client dependencies..."
+            npm install
+        }
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw "Client build failed" }
+        Write-Host "  Client built: $WebRendererClientDir\dist\" -ForegroundColor Green
+    } finally {
+        Pop-Location
+    }
+
+    # Build server
+    Write-Step "Building Web Renderer 2 server (TypeScript)..."
+    Push-Location $WebRendererServerDir
+    try {
+        if (-not (Test-Path "node_modules")) {
+            Write-Host "  Installing server dependencies..."
+            npm install
+        }
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw "Server build failed" }
+        Write-Host "  Server built: $WebRendererServerDir\dist\" -ForegroundColor Green
+    } finally {
+        Pop-Location
+    }
+
+    # Create staging directory for PyInstaller bundling
+    Write-Step "Creating staging directory for PyInstaller..."
+    if (Test-Path $StagingDir) { Remove-Item -Recurse -Force $StagingDir }
+    New-Item -ItemType Directory -Force -Path "$StagingDir\server\dist" | Out-Null
+    New-Item -ItemType Directory -Force -Path "$StagingDir\client\dist" | Out-Null
+
+    Copy-Item -Recurse "$WebRendererServerDir\dist\*" "$StagingDir\server\dist\"
+    Copy-Item "$WebRendererServerDir\package.json" "$StagingDir\server\"
+    Copy-Item -Recurse "$WebRendererClientDir\dist\*" "$StagingDir\client\dist\"
+
+    Write-Host "  Staging: $StagingDir" -ForegroundColor Green
+}
+
 # ── clean ────────────────────────────────────────────────────────────
 
 if ($Clean) {
@@ -151,6 +258,10 @@ if (-not $SkipMpv) {
     $pyiArgs += "--add-binary=bin/mpv.exe;bin"
 }
 
+if ($WithWebRenderer) {
+    $pyiArgs += "--add-data=$StagingDir;web_renderer_2_app"
+}
+
 $pyiArgs += "Macast.py"
 
 & $Python -m PyInstaller $pyiArgs
@@ -158,6 +269,38 @@ $pyiArgs += "Macast.py"
 if ($LASTEXITCODE -ne 0) {
     Write-Err "PyInstaller failed with exit code $LASTEXITCODE"
     exit $LASTEXITCODE
+}
+
+# ── post-build: deploy plugin to local settings dir ──────────────────
+
+if ($WithWebRenderer) {
+    Write-Step "Deploying Web Renderer 2 plugin to local settings directory..."
+
+    $SettingsDir = "$env:LOCALAPPDATA\xfangfang\Macast"
+    $AppDir = "$SettingsDir\web_renderer_2_app"
+    $PluginDir = "$SettingsDir\renderer"
+    $PluginSrc = Join-Path $WebRendererDir "macast_renderer.py"
+
+    # Deploy app files (so it works immediately from source runs too)
+    if (Test-Path "$AppDir\server\dist") { Remove-Item -Recurse -Force "$AppDir\server\dist" }
+    if (Test-Path "$AppDir\client\dist") { Remove-Item -Recurse -Force "$AppDir\client\dist" }
+    New-Item -ItemType Directory -Force -Path "$AppDir\server\dist" | Out-Null
+    New-Item -ItemType Directory -Force -Path "$AppDir\client\dist" | Out-Null
+
+    Copy-Item -Recurse -Force "$StagingDir\server\*" "$AppDir\server\"
+    Copy-Item -Recurse -Force "$StagingDir\client\*" "$AppDir\client\"
+
+    Push-Location "$AppDir\server"
+    Write-Host "  Installing server production dependencies..."
+    npm install --omit=dev
+    Pop-Location
+
+    # Deploy plugin file
+    New-Item -ItemType Directory -Force -Path $PluginDir | Out-Null
+    Copy-Item $PluginSrc "$PluginDir\web_renderer_2.py" -Force
+
+    Write-Host "  Plugin:  $PluginDir\web_renderer_2.py" -ForegroundColor Green
+    Write-Host "  App:     $AppDir" -ForegroundColor Green
 }
 
 # ── result ───────────────────────────────────────────────────────────
@@ -168,6 +311,11 @@ if (Test-Path $ExePath) {
     Write-Host "`n>>> Build complete:" -ForegroundColor Green
     Write-Host "    $ExePath" -ForegroundColor White
     Write-Host "    Size: $size" -ForegroundColor White
+    if ($WithWebRenderer) {
+        Write-Host "`n    Web Renderer 2 is bundled in the exe." -ForegroundColor Cyan
+        Write-Host "    On first run, it auto-extracts to:" -ForegroundColor Cyan
+        Write-Host "    $env:LOCALAPPDATA\xfangfang\Macast\web_renderer_2_app\" -ForegroundColor Cyan
+    }
 } else {
     Write-Err "Output exe not found at $ExePath"
     exit 1

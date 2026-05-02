@@ -131,5 +131,9 @@ dmypy.json
 bin
 mpv-latest.tar.gz
 
+# Web Renderer 2 build artifacts
+web_renderer_2/staging/
+web_renderer_2/**/node_modules/
+
 # Vendor nested git repos
 vendor/**/.git/

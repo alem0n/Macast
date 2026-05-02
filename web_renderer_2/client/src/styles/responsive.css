@@ -1,0 +1,169 @@
+/* === Desktop (≥1200px) === */
+@media (min-width: 1200px) {
+  .player-container {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+}
+
+/* === Tablet (768px-1199px) === */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .player-container {
+    width: 90vw;
+    margin: 0 auto;
+  }
+
+  .controls-bar {
+    padding: 0 var(--spacing-sm);
+  }
+
+  .volume-slider {
+    width: 60px;
+  }
+
+  .media-info {
+    display: none;
+  }
+
+  .playlist-panel {
+    width: 240px;
+    min-width: 240px;
+  }
+
+  .playlist-panel.playlist-collapsed {
+    width: 36px;
+    min-width: 36px;
+  }
+}
+
+/* === Mobile (≤767px) === */
+@media (max-width: 767px) {
+  .player-container {
+    width: 100vw;
+    border-radius: 0;
+  }
+
+  .top-bar {
+    padding: 0 var(--spacing-sm);
+    font-size: var(--font-size-xs);
+  }
+
+  .media-info {
+    display: none;
+  }
+
+  .main-content {
+    padding: 0;
+  }
+
+  .controls-bar {
+    height: 40px;
+    padding: 0 var(--spacing-xs);
+    justify-content: space-between;
+  }
+
+  .volume-slider {
+    display: none;
+  }
+
+  .time-display {
+    font-size: 11px;
+    min-width: 36px;
+  }
+
+  .cast-input-bar {
+    height: 48px;
+    padding: var(--spacing-xs) var(--spacing-sm);
+  }
+
+  .cast-submit-btn {
+    padding: 0 var(--spacing-sm);
+    font-size: var(--font-size-xs);
+  }
+
+  .app-title {
+    font-size: var(--font-size-xs);
+  }
+
+  .user-device-breakdown {
+    display: none;
+  }
+
+  .progress-bar-container {
+    gap: var(--spacing-xs);
+  }
+
+  /* Playlist as bottom drawer on mobile */
+  .playlist-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-height: 40vh;
+    border-left: none;
+    border-top: 1px solid var(--border-color);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+    z-index: 100;
+    transition: max-height var(--transition-normal);
+  }
+
+  .playlist-panel.playlist-collapsed {
+    max-height: 40px;
+    min-width: 100% !important;
+  }
+}
+
+/* === Fullscreen landscape — mobile devices === */
+@media (orientation: landscape) and (max-height: 500px) {
+  .player-fullscreen .controls-bar {
+    height: 36px;
+    gap: var(--spacing-xs);
+  }
+
+  .player-fullscreen .control-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .player-fullscreen .volume-slider {
+    width: 60px;
+  }
+
+  .player-fullscreen .progress-bar-container {
+    margin-bottom: 2px;
+  }
+
+  .player-fullscreen .time-display {
+    font-size: 11px;
+    min-width: 40px;
+  }
+
+  .player-fullscreen .player-controls {
+    padding: var(--spacing-sm) var(--spacing-md) var(--spacing-xs);
+  }
+}
+
+/* === High-DPI / Retina adjustments === */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .control-btn svg,
+  .playlist-item-delete svg,
+  .cast-input-icon svg,
+  .user-status-icon svg {
+    /* SVG handles scaling natively — no changes needed */
+  }
+}
+
+/* === Large desktop (≥1600px) === */
+@media (min-width: 1600px) {
+  .player-container {
+    max-width: 1100px;
+  }
+
+  .playlist-panel {
+    width: 320px;
+    min-width: 320px;
+  }
+}
