@@ -8,8 +8,9 @@
     dependencies, compiles translations, and bundles everything with PyInstaller.
     The resulting exe includes mpv and is ready for distribution.
 
-    With -WithWebRenderer, also builds the Web Renderer 2 subproject
-    (Node.js server + React client) and bundles it into the exe.
+    With -WithWebRenderer, also builds the Web Renderer 2 React client
+    and bundles it together with the Python server (aiohttp) into the exe.
+    No Node.js runtime is needed on the target machine.
 
 .PARAMETER Clean
     Remove build/dist/Macast.spec before building (default: true).
@@ -18,8 +19,10 @@
     Build without bundling mpv (smaller exe, but mpv must be installed separately).
 
 .PARAMETER WithWebRenderer
-    Build and bundle the Web Renderer 2 subproject. Requires Node.js >= 18 and npm.
+    Build and bundle the Web Renderer 2 subproject.
+    Requires Node.js >= 18 and npm for building the React client only.
     The bundled app is auto-extracted to the Macast settings directory on first run.
+    No Node.js required at runtime — the server is Python (aiohttp).
 
 .EXAMPLE
     .\build.ps1
@@ -55,11 +58,11 @@ OPTIONS:
                        target machine.
 
   -WithWebRenderer     Build and bundle the Web Renderer 2 subproject.
-                       Requires Node.js >= 18 and npm.
-                       Builds the React client (Vite) and Express server
-                       (TypeScript), then bundles everything into the exe.
+                       Requires Node.js >= 18 and npm (build only, not runtime).
+                       Builds the React client (Vite), then bundles it with
+                       the Python aiohttp server into the exe.
                        On first run, the app auto-extracts to:
-                         `%LOCALAPPDATA%\xfangfang\Macast\web_renderer_2_app\`
+                         %LOCALAPPDATA%\xfangfang\Macast\web_renderer_2_app\
 
   -Help                Show this help and exit.
 
@@ -83,7 +86,7 @@ $BinDir = Join-Path $ProjectRoot "bin"
 $MpvExe = Join-Path $BinDir "mpv.exe"
 $WebRendererDir = Join-Path $ProjectRoot "web_renderer_2"
 $WebRendererClientDir = Join-Path $WebRendererDir "client"
-$WebRendererServerDir = Join-Path $WebRendererDir "server"
+$ServerPyDir = Join-Path $WebRendererDir "server_py"
 $StagingDir = Join-Path $WebRendererDir "staging"
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -154,6 +157,11 @@ Write-Step "Upgrading pip..."
 Write-Step "Installing runtime dependencies..."
 & $Pip install requests appdirs cherrypy lxml netifaces pillow pyperclip pystray pywin32 --quiet
 
+if ($WithWebRenderer) {
+    Write-Step "Installing Web Renderer 2 dependency (aiohttp)..."
+    & $Pip install aiohttp --quiet
+}
+
 Write-Step "Installing build tools..."
 & $Pip install pyinstaller polib --quiet
 
@@ -180,9 +188,9 @@ if ($WithWebRenderer) {
     Ensure-Command npm
 
     $nodeVer = & node --version
-    Write-Host "[ok] Node.js $nodeVer detected" -ForegroundColor Green
+    Write-Host "[ok] Node.js $nodeVer detected (build only)" -ForegroundColor Green
 
-    # Build client
+    # Build client only (Python server needs no build step)
     Write-Step "Building Web Renderer 2 client (Vite + React)..."
     Push-Location $WebRendererClientDir
     try {
@@ -197,29 +205,13 @@ if ($WithWebRenderer) {
         Pop-Location
     }
 
-    # Build server
-    Write-Step "Building Web Renderer 2 server (TypeScript)..."
-    Push-Location $WebRendererServerDir
-    try {
-        if (-not (Test-Path "node_modules")) {
-            Write-Host "  Installing server dependencies..."
-            npm install
-        }
-        npm run build
-        if ($LASTEXITCODE -ne 0) { throw "Server build failed" }
-        Write-Host "  Server built: $WebRendererServerDir\dist\" -ForegroundColor Green
-    } finally {
-        Pop-Location
-    }
-
     # Create staging directory for PyInstaller bundling
     Write-Step "Creating staging directory for PyInstaller..."
     if (Test-Path $StagingDir) { Remove-Item -Recurse -Force $StagingDir }
-    New-Item -ItemType Directory -Force -Path "$StagingDir\server\dist" | Out-Null
+    New-Item -ItemType Directory -Force -Path "$StagingDir\server_py" | Out-Null
     New-Item -ItemType Directory -Force -Path "$StagingDir\client\dist" | Out-Null
 
-    Copy-Item -Recurse "$WebRendererServerDir\dist\*" "$StagingDir\server\dist\"
-    Copy-Item "$WebRendererServerDir\package.json" "$StagingDir\server\"
+    Copy-Item -Recurse "$ServerPyDir\*" "$StagingDir\server_py\"
     Copy-Item -Recurse "$WebRendererClientDir\dist\*" "$StagingDir\client\dist\"
 
     Write-Host "  Staging: $StagingDir" -ForegroundColor Green
@@ -260,6 +252,7 @@ if (-not $SkipMpv) {
 
 if ($WithWebRenderer) {
     $pyiArgs += "--add-data=$StagingDir;web_renderer_2_app"
+    $pyiArgs += "--hidden-import=aiohttp"
 }
 
 $pyiArgs += "Macast.py"
@@ -271,29 +264,24 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-# ── post-build: deploy plugin to local settings dir ──────────────────
+# ── post-build: deploy plugin + app to local settings dir ─────────────
 
 if ($WithWebRenderer) {
-    Write-Step "Deploying Web Renderer 2 plugin to local settings directory..."
+    Write-Step "Deploying Web Renderer 2 to local settings directory..."
 
     $SettingsDir = "$env:LOCALAPPDATA\xfangfang\Macast"
     $AppDir = "$SettingsDir\web_renderer_2_app"
     $PluginDir = "$SettingsDir\renderer"
     $PluginSrc = Join-Path $WebRendererDir "macast_renderer.py"
 
-    # Deploy app files (so it works immediately from source runs too)
-    if (Test-Path "$AppDir\server\dist") { Remove-Item -Recurse -Force "$AppDir\server\dist" }
+    # Deploy app files
+    if (Test-Path "$AppDir\server_py") { Remove-Item -Recurse -Force "$AppDir\server_py" }
     if (Test-Path "$AppDir\client\dist") { Remove-Item -Recurse -Force "$AppDir\client\dist" }
-    New-Item -ItemType Directory -Force -Path "$AppDir\server\dist" | Out-Null
+    New-Item -ItemType Directory -Force -Path "$AppDir\server_py" | Out-Null
     New-Item -ItemType Directory -Force -Path "$AppDir\client\dist" | Out-Null
 
-    Copy-Item -Recurse -Force "$StagingDir\server\*" "$AppDir\server\"
+    Copy-Item -Recurse -Force "$StagingDir\server_py\*" "$AppDir\server_py\"
     Copy-Item -Recurse -Force "$StagingDir\client\*" "$AppDir\client\"
-
-    Push-Location "$AppDir\server"
-    Write-Host "  Installing server production dependencies..."
-    npm install --omit=dev
-    Pop-Location
 
     # Deploy plugin file
     New-Item -ItemType Directory -Force -Path $PluginDir | Out-Null
@@ -315,6 +303,7 @@ if (Test-Path $ExePath) {
         Write-Host "`n    Web Renderer 2 is bundled in the exe." -ForegroundColor Cyan
         Write-Host "    On first run, it auto-extracts to:" -ForegroundColor Cyan
         Write-Host "    $env:LOCALAPPDATA\xfangfang\Macast\web_renderer_2_app\" -ForegroundColor Cyan
+        Write-Host "    No Node.js required at runtime — server runs in-process (Python aiohttp)." -ForegroundColor Cyan
     }
 } else {
     Write-Err "Output exe not found at $ExePath"

@@ -1,5 +1,5 @@
 # Web Renderer 2 — Deploy Script (Windows PowerShell)
-# Builds server + client and packages to:
+# Builds the React client and deploys the Python server + client to:
 #   1. Macast settings directory (runtime) — default behavior
 #   2. Staging directory (for PyInstaller bundling) — with -StagingDir
 #
@@ -20,17 +20,20 @@ if ($Help) {
     Write-Host @"
 Web Renderer 2 — Deploy Script (deploy.ps1)
 
-Build the server + client and deploy to the Macast settings directory,
-or create a staging directory for PyInstaller bundling.
+Build the React client and deploy the Python server + client to the
+Macast settings directory, or create a staging directory for PyInstaller.
+
+No Node.js runtime required on the target machine — the server runs in
+Python using aiohttp.
 
 USAGE:
   .\web_renderer_2\deploy.ps1 [OPTIONS]
 
 OPTIONS:
-  -SkipBuild           Skip the npm build steps.
-                       Use when dist/ directories are already built.
+  -SkipBuild           Skip the npm build step.
+                       Use when client/dist/ is already built.
 
-  -SkipNpmInstall      Skip npm install for dependencies.
+  -SkipNpmInstall      Skip npm install for client dependencies.
                        Use when node_modules/ are already present.
 
   -StagingDir <path>   Also copy build artifacts to a staging directory
@@ -40,8 +43,8 @@ OPTIONS:
   -Help                Show this help and exit.
 
 DEPLOY TARGETS:
-  Settings dir:  `%LOCALAPPDATA%\xfangfang\Macast\web_renderer_2_app\
-  Plugin dir:    `%LOCALAPPDATA%\xfangfang\Macast\renderer\web_renderer_2.py
+  Settings dir:  %LOCALAPPDATA%\xfangfang\Macast\web_renderer_2_app\
+  Plugin dir:    %LOCALAPPDATA%\xfangfang\Macast\renderer\web_renderer_2.py
 
 EXAMPLES:
   .\web_renderer_2\deploy.ps1                    Full deploy (build + install)
@@ -57,8 +60,8 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $SettingsDir = "$env:LOCALAPPDATA\xfangfang\Macast"
 $AppDir = "$SettingsDir\web_renderer_2_app"
 $PluginDir = "$SettingsDir\renderer"
-$ServerSrc = "$PSScriptRoot\server"
 $ClientSrc = "$PSScriptRoot\client"
+$ServerPySrc = "$PSScriptRoot\server_py"
 
 Write-Host "=== Web Renderer 2 Deploy ===" -ForegroundColor Cyan
 Write-Host "SettingsDir: $SettingsDir"
@@ -76,13 +79,13 @@ function Ensure-Command($name) {
     }
 }
 
-# ── 1. Build ─────────────────────────────────────────────────────────
+# ── 1. Build client ──────────────────────────────────────────────────
 
 if (-not $SkipBuild) {
     Ensure-Command node
     Ensure-Command npm
 
-    Write-Host "`n[1/4] Building client (Vite + React)..." -ForegroundColor Yellow
+    Write-Host "`n[1/3] Building client (Vite + React)..." -ForegroundColor Yellow
     Push-Location $ClientSrc
     try {
         if (-not $SkipNpmInstall -or -not (Test-Path "node_modules")) {
@@ -94,38 +97,27 @@ if (-not $SkipBuild) {
     } finally {
         Pop-Location
     }
-
-    Write-Host "`n[2/4] Building server (TypeScript)..." -ForegroundColor Yellow
-    Push-Location $ServerSrc
-    try {
-        if (-not $SkipNpmInstall -or -not (Test-Path "node_modules")) {
-            npm install
-        }
-        npm run build
-        if ($LASTEXITCODE -ne 0) { throw "Server build failed" }
-        Write-Host "  Server built: $ServerSrc\dist\" -ForegroundColor Green
-    } finally {
-        Pop-Location
-    }
 } else {
     Write-Host "`nSkipping build (-SkipBuild)" -ForegroundColor Gray
 }
 
 # ── 2. Copy artifacts to SETTING_DIR ─────────────────────────────────
 
-Write-Host "`n[3/4] Copying build artifacts to settings directory..." -ForegroundColor Yellow
+Write-Host "`n[2/3] Copying build artifacts to settings directory..." -ForegroundColor Yellow
 
-# Clean and recreate app directory
-if (Test-Path "$AppDir\server\dist") { Remove-Item -Recurse -Force "$AppDir\server\dist" }
+# Clean and recreate app directories
+if (Test-Path "$AppDir\server_py") { Remove-Item -Recurse -Force "$AppDir\server_py" }
 if (Test-Path "$AppDir\client\dist") { Remove-Item -Recurse -Force "$AppDir\client\dist" }
-New-Item -ItemType Directory -Force -Path "$AppDir\server\dist" | Out-Null
+New-Item -ItemType Directory -Force -Path "$AppDir\server_py" | Out-Null
 New-Item -ItemType Directory -Force -Path "$AppDir\client\dist" | Out-Null
 
-Copy-Item -Recurse "$ServerSrc\dist\*" "$AppDir\server\dist\"
-Copy-Item -Recurse "$ClientSrc\dist\*" "$AppDir\client\dist\"
-Copy-Item "$ServerSrc\package.json" "$AppDir\server\"
+# Copy Python server package
+Copy-Item -Recurse "$ServerPySrc\*" "$AppDir\server_py\"
 
-Write-Host "  Server: $AppDir\server\dist\" -ForegroundColor Green
+# Copy React client build
+Copy-Item -Recurse "$ClientSrc\dist\*" "$AppDir\client\dist\"
+
+Write-Host "  Server: $AppDir\server_py\" -ForegroundColor Green
 Write-Host "  Client: $AppDir\client\dist\" -ForegroundColor Green
 
 # ── 2b. Copy artifacts to staging dir (if requested) ─────────────────
@@ -133,30 +125,22 @@ Write-Host "  Client: $AppDir\client\dist\" -ForegroundColor Green
 if ($StagingDir) {
     Write-Host "`n Copying build artifacts to staging directory..." -ForegroundColor Yellow
     if (Test-Path $StagingDir) { Remove-Item -Recurse -Force $StagingDir }
-    New-Item -ItemType Directory -Force -Path "$StagingDir\server\dist" | Out-Null
+    New-Item -ItemType Directory -Force -Path "$StagingDir\server_py" | Out-Null
     New-Item -ItemType Directory -Force -Path "$StagingDir\client\dist" | Out-Null
 
-    Copy-Item -Recurse "$ServerSrc\dist\*" "$StagingDir\server\dist\"
-    Copy-Item "$ServerSrc\package.json" "$StagingDir\server\"
+    Copy-Item -Recurse "$ServerPySrc\*" "$StagingDir\server_py\"
     Copy-Item -Recurse "$ClientSrc\dist\*" "$StagingDir\client\dist\"
 
     Write-Host "  Staging: $StagingDir" -ForegroundColor Green
 }
 
-# ── 3. Install production dependencies ───────────────────────────────
+# ── 3. Deploy plugin file ────────────────────────────────────────────
 
-Write-Host "`n[4/4] Installing production dependencies..." -ForegroundColor Yellow
-Push-Location "$AppDir\server"
-npm install --omit=dev
-Pop-Location
-Write-Host "  Dependencies installed in $AppDir\server\node_modules\" -ForegroundColor Green
-
-# ── 4. Deploy plugin file ────────────────────────────────────────────
-
-Write-Host "`n Deploying plugin file..." -ForegroundColor Yellow
+Write-Host "`n[3/3] Deploying plugin file..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Force -Path $PluginDir | Out-Null
 Copy-Item "$PSScriptRoot\macast_renderer.py" "$PluginDir\web_renderer_2.py" -Force
 Write-Host "  Plugin: $PluginDir\web_renderer_2.py" -ForegroundColor Green
 
 Write-Host "`n=== Deploy complete ===" -ForegroundColor Green
 Write-Host "Restart Macast and select 'Web Renderer 2' from Settings > Renderers."
+Write-Host "No Node.js required — the Python server runs in-process via aiohttp."

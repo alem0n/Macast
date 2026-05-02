@@ -1,18 +1,18 @@
 # <macast.renderer>WebRenderer2</macast.renderer>
 # <macast.title>Web Renderer 2</macast.title>
 # <macast.platform>win32,linux,darwin</macast.platform>
-# <macast.version>1.0.0</macast.version>
+# <macast.version>2.0.0</macast.version>
 # <macast.author>Macast</macast.author>
-# <macast.desc>Browser-based cast receiver — DLNA投屏转Web播放，多用户同时观看。选中后自动启动内置Node.js服务。</macast.desc>
+# <macast.desc>Browser-based cast receiver — DLNA投屏转Web播放，多用户同时观看。内置Python服务端，无需Node.js。</macast.desc>
 
 import os
 import sys
 import time
 import shutil
 import logging
+import threading
 import requests
 import webbrowser
-import subprocess
 
 from macast.renderer import Renderer
 
@@ -22,17 +22,8 @@ logger.setLevel(logging.INFO)
 WEB_RENDERER_URL = "http://127.0.0.1:2554/api/cast"
 SERVER_PORT = 2554
 
-# Prevent console windows from appearing on Windows
-_CREATION_FLAGS = 0
-if sys.platform == 'win32':
-    _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW  # 0x08000000, since Python 3.7
-
-# Persistent app directory: {SETTING_DIR}/web_renderer_2_app/server/
-# SETTING_DIR = os.path.dirname(os.path.dirname(__file__)) which is the
-# Macast config dir (e.g. %LOCALAPPDATA%/xfangfang/Macast on Windows).
 SETTING_DIR = os.path.dirname(os.path.dirname(__file__))
 APP_DIR = os.path.join(SETTING_DIR, 'web_renderer_2_app')
-SERVER_DIR = os.path.join(APP_DIR, 'server')
 
 # Bundled app directory (only set when running from PyInstaller exe)
 BUNDLED_APP_DIR = None
@@ -50,64 +41,45 @@ class WebRenderer2(Renderer):
         super().__init__(lang)
         self._title = ""
         self._pending_url = ""
-        self._proc = None
+        self._server_thread = None
+        self._server_ready = False
 
-    # ── prerequisites ──────────────────────────────────────────────
+    # ── server file resolution ─────────────────────────────────────
 
-    def _check_node(self):
-        try:
-            subprocess.run(['node', '--version'],
-                         capture_output=True, timeout=5,
-                         creationflags=_CREATION_FLAGS)
-            return True
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return False
+    def _resolve_app_dir(self):
+        """Return (app_dir, static_dir) for the current run mode.
 
-    def _check_server_dir(self):
-        entry = os.path.join(SERVER_DIR, 'dist', 'index.js')
-        return os.path.isfile(entry)
+        Priority: 1) persistent SETTING_DIR  2) bundled MEIPASS dir.
+        On first PyInstaller run, extracts the bundled app to SETTING_DIR
+        so that future runs don't depend on the MEIPASS temp dir.
+        """
+        # Already deployed to persistent location?
+        server_init = os.path.join(APP_DIR, 'server_py', '__init__.py')
+        static_index = os.path.join(APP_DIR, 'client', 'dist', 'index.html')
 
-    def _extract_bundled_app(self):
-        """Copy bundled web_renderer_2_app from PyInstaller temp dir to SETTING_DIR."""
-        if not BUNDLED_APP_DIR:
-            return False
+        if os.path.isfile(server_init) and os.path.isfile(static_index):
+            logger.info("Using persistent app dir: %s", APP_DIR)
+            return APP_DIR, os.path.join(APP_DIR, 'client', 'dist')
 
-        logger.info("Extracting bundled Web Renderer 2 app to %s", APP_DIR)
-        try:
-            if os.path.isdir(APP_DIR):
-                shutil.rmtree(APP_DIR)
-            shutil.copytree(BUNDLED_APP_DIR, APP_DIR)
-            logger.info("Extraction complete")
-            return True
-        except Exception as e:
-            logger.error("Failed to extract bundled app: %s", e)
-            return False
+        # Extract from PyInstaller bundle if available
+        if BUNDLED_APP_DIR:
+            logger.info("Extracting bundled Web Renderer 2 app to %s", APP_DIR)
+            try:
+                if os.path.isdir(APP_DIR):
+                    shutil.rmtree(APP_DIR)
+                shutil.copytree(BUNDLED_APP_DIR, APP_DIR)
+                logger.info("Extraction complete")
+                return APP_DIR, os.path.join(APP_DIR, 'client', 'dist')
+            except Exception as e:
+                logger.error("Failed to extract bundled app: %s", e)
+                # Fall back to in-place serving from MEIPASS
+                return BUNDLED_APP_DIR, os.path.join(BUNDLED_APP_DIR, 'client', 'dist')
 
-    def _ensure_deps(self):
-        """Install server production dependencies if node_modules is missing."""
-        node_modules = os.path.join(SERVER_DIR, 'node_modules')
-        if os.path.isdir(node_modules):
-            return True
-
-        package_json = os.path.join(SERVER_DIR, 'package.json')
-        if not os.path.isfile(package_json):
-            logger.error("package.json not found at %s", package_json)
-            return False
-
-        logger.info("Installing server production dependencies...")
-        try:
-            subprocess.run(
-                ['npm', 'install', '--omit=dev'],
-                cwd=SERVER_DIR,
-                capture_output=True,
-                timeout=120,
-                creationflags=_CREATION_FLAGS,
-            )
-            logger.info("Dependencies installed")
-            return True
-        except Exception as e:
-            logger.error("Failed to install dependencies: %s", e)
-            return False
+        logger.error(
+            "Web Renderer 2 app files not found. "
+            "Run deploy.ps1 first or build with -WithWebRenderer."
+        )
+        return None, None
 
     # ── server lifecycle ───────────────────────────────────────────
 
@@ -119,7 +91,7 @@ class WebRenderer2(Renderer):
                     f'http://127.0.0.1:{SERVER_PORT}/api/status',
                     timeout=2)
                 if resp.status_code == 200:
-                    logger.info("Web Renderer 2 server is ready")
+                    logger.info("Web Renderer 2 Python server is ready")
                     return True
             except requests.ConnectionError:
                 pass
@@ -127,80 +99,63 @@ class WebRenderer2(Renderer):
         return False
 
     def _open_browser(self, url):
-        """Open browser using platform-specific method, same as App.open_browser()."""
         try:
             if sys.platform == 'darwin':
-                subprocess.Popen(['open', url], creationflags=_CREATION_FLAGS)
+                import subprocess
+                subprocess.Popen(['open', url])
             elif sys.platform == 'win32':
                 webbrowser.open(url)
             else:
-                subprocess.Popen(["xdg-open", url], creationflags=_CREATION_FLAGS)
-            logger.info(f"Browser opened: {url}")
+                import subprocess
+                subprocess.Popen(["xdg-open", url])
+            logger.info("Browser opened: %s", url)
         except Exception as e:
-            logger.error(f"Failed to open browser: {e}")
+            logger.error("Failed to open browser: %s", e)
 
     def start(self):
         super().start()
 
-        if not self._check_node():
-            logger.error("Node.js not found. Web Renderer 2 requires Node.js >= 18.")
+        app_dir, static_dir = self._resolve_app_dir()
+        if not app_dir:
             return
 
-        # Ensure server files exist in persistent location.
-        # Priority: 1) already deployed  2) extract from PyInstaller bundle
-        if not self._check_server_dir():
-            if BUNDLED_APP_DIR:
-                if not self._extract_bundled_app():
-                    return
-            else:
-                logger.error(
-                    "Server files not found at %s/dist/ and no bundled app available. "
-                    "Run deploy.ps1 first or build with -WithWebRenderer.",
-                    SERVER_DIR
-                )
-                return
-
-        if not self._ensure_deps():
-            return
+        # Ensure server_py package is importable
+        if app_dir not in sys.path:
+            sys.path.insert(0, app_dir)
 
         try:
-            self._proc = subprocess.Popen(
-                ['node', 'dist/index.js'],
-                cwd=SERVER_DIR,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=_CREATION_FLAGS,
-            )
-            logger.info(f"Web Renderer 2 server starting (pid={self._proc.pid})")
+            import server_py.server as server_module
+        except ImportError as e:
+            logger.error("Failed to import server_py: %s", e)
+            return
 
-            if self._wait_for_server(timeout=10):
-                logger.info("Web Renderer 2 started successfully")
-                self._open_browser(f'http://127.0.0.1:{SERVER_PORT}')
-            else:
-                logger.error("Web Renderer 2 server failed to start in time")
-        except Exception as e:
-            logger.error(f"Failed to start Web Renderer 2 server: {e}")
-            self._proc = None
+        self._server_thread = threading.Thread(
+            target=server_module.run_server,
+            args=(static_dir,),
+            daemon=True,
+            name="web-renderer-2-server",
+        )
+        self._server_thread.start()
+
+        if self._wait_for_server(timeout=10):
+            logger.info("Web Renderer 2 started successfully")
+            self._open_browser(f'http://127.0.0.1:{SERVER_PORT}')
+        else:
+            logger.error("Web Renderer 2 Python server failed to start in time")
 
     def stop(self):
         logger.info("Stopping Web Renderer 2 server")
-        if self._proc:
-            try:
-                if sys.platform == 'win32':
-                    subprocess.run(['taskkill', '/f', '/t', '/pid', str(self._proc.pid)],
-                                 capture_output=True, timeout=5,
-                                 creationflags=_CREATION_FLAGS)
-                else:
-                    self._proc.terminate()
-                    try:
-                        self._proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        self._proc.kill()
-                        self._proc.wait(timeout=3)
-            except Exception as e:
-                logger.error(f"Error stopping server: {e}")
-            finally:
-                self._proc = None
+        try:
+            import server_py.server as server_module
+            server_module.stop_server()
+        except ImportError:
+            pass
+
+        if self._server_thread and self._server_thread.is_alive():
+            self._server_thread.join(timeout=5)
+            if self._server_thread.is_alive():
+                logger.warning("Server thread did not stop within 5 seconds")
+        self._server_thread = None
         super().stop()
 
     # ── cast forwarding ────────────────────────────────────────────
