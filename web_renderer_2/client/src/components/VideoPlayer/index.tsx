@@ -22,6 +22,10 @@ const VideoPlayer: React.FC = () => {
   // BEFORE the handler shows them. Used to decide whether a
   // subsequent tap/click should toggle playback or just show controls.
   const controlsWereVisibleRef = useRef(true);
+  // Suppress the synthetic click the browser fires ~300ms after touchend.
+  // Without this, a tap that resumes playback is immediately undone by the
+  // delayed click handler which sees status='playing' and pauses again.
+  const suppressNextClickRef = useRef(false);
 
   const media = useSelector((s: RootState) => s.player.media);
   const status = useSelector((s: RootState) => s.player.status);
@@ -69,6 +73,7 @@ const VideoPlayer: React.FC = () => {
       video.play().catch(() => {});
     }
     dispatch(togglePlay());
+    suppressNextClickRef.current = true;
   }, [dispatch, status, videoRef, media]);
 
   // Snapshots controls visibility and shows them on every touch.
@@ -109,6 +114,13 @@ const VideoPlayer: React.FC = () => {
   }, [controlsVisible, showControls]);
 
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    // Ignore synthetic click that fires ~300ms after a touch tap —
+    // the tap was already handled by handleSingleTap.
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+
     const target = e.target as HTMLElement;
     if (target.closest('.player-controls')) return;
 

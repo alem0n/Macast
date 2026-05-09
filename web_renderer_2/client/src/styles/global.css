@@ -246,6 +246,30 @@ html, body {
   z-index: 10;
 }
 
+/* === Pause overlay — transparent, faint play icon over paused frame === */
+.pause-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  cursor: pointer;
+}
+
+.pause-play-icon {
+  opacity: 0.3;
+  color: #fff;
+  transition: opacity var(--transition-fast);
+}
+
+.pause-overlay:hover .pause-play-icon {
+  opacity: 0.55;
+}
+
 .status-content {
   text-align: center;
   color: var(--player-text);

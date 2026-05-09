@@ -35,16 +35,11 @@ const StatusOverlay: React.FC<{ videoRef?: React.RefObject<HTMLVideoElement | nu
     return null;
   }
 
-  // Show large play button when paused (autoplay was blocked)
+  // Show faint play icon when paused — transparent overlay so the frame is visible
   if (status === 'paused' && media) {
     return (
-      <div className="status-overlay" onClick={handleManualPlay}>
-        <div className="status-content">
-          <button className="autoplay-fallback-btn" onClick={handleManualPlay} aria-label="点击播放">
-            <PlayIcon size={64} />
-          </button>
-          <p className="status-hint">浏览器阻止了自动播放，请点击播放</p>
-        </div>
+      <div className="pause-overlay" onClick={handleManualPlay}>
+        <PlayIcon size={64} className="pause-play-icon" />
       </div>
     );
   }
