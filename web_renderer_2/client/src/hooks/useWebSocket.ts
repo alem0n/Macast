@@ -55,11 +55,17 @@ export function useWebSocket(): void {
             dispatch(appendItem(media));
 
             const state = getStore().getState();
+            const newIdx = state.playlist.items.length - 1;
             const localIdx = state.playlist.currentIndex;
-            log(`cast:new | currentIndex=${localIdx} itemsCount=${state.playlist.items.length}`);
 
-            if (localIdx < 0) {
-              const newIdx = state.playlist.items.length - 1;
+            // DLNA casts (source='dlna') always抢占当前播放 — 用户从手机
+            // 投屏的意图就是立即观看。web 来源（用户在浏览器输入栏投屏）
+            // 仅在空闲时自动播放，避免打断正在进行的观看。
+            if (media.source === 'dlna') {
+              log(`cast:new | DLNA FORCE-PLAY — switching from index=${localIdx} to ${newIdx}`);
+              dispatch(playMediaItem(newIdx));
+              dispatch(receiveCast(media));
+            } else if (localIdx < 0) {
               log(`cast:new | AUTO-PLAY — idle browser, setting currentIndex=${newIdx}`);
               dispatch(playMediaItem(newIdx));
               dispatch(receiveCast(media));

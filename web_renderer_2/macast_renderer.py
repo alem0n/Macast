@@ -39,8 +39,7 @@ class WebRenderer2(Renderer):
 
     def __init__(self, lang=None):
         super().__init__(lang)
-        self._title = ""
-        self._pending_url = ""
+        self._last_cast_id = None
         self._server_thread = None
         self._server_ready = False
 
@@ -178,9 +177,11 @@ class WebRenderer2(Renderer):
             )
             if resp.status_code == 201:
                 data = resp.json()
+                mid = data.get('media', {}).get('id', '?')
+                self._last_cast_id = mid
                 logger.info(
                     "[_post_cast] OK — server assigned id=%s title=%s format=%s",
-                    data.get('media', {}).get('id', '?'),
+                    mid,
                     data.get('media', {}).get('title', '?'),
                     data.get('media', {}).get('format', '?'),
                 )
@@ -194,20 +195,31 @@ class WebRenderer2(Renderer):
     # ── Renderer interface ─────────────────────────────────────────
 
     def set_media_url(self, url, start="0"):
-        self._pending_url = url
-        logger.info("[set_media_url] URL=%s (deferred, waiting for title)", url)
-        if self._title:
-            self._post_cast(url, self._title)
-            self._title = ""
-            self._pending_url = ""
+        # Forward immediately — don't wait for set_media_title, which may
+        # arrive seconds later (or never) depending on the DLNA client.
+        # The server updates the title in-place if a later cast arrives
+        # carrying one.
+        self._post_cast(url, "")
 
     def set_media_title(self, data):
-        logger.info("[set_media_title] title=%s", data)
-        self._title = data
-        if self._pending_url:
-            self._post_cast(self._pending_url, data)
-            self._pending_url = ""
-            self._title = ""
+        # DLNA clients send SetAVTransportURI first, then separately send
+        # the title. By the time we get here, the media is already playing
+        # in the browser. We re-POST with the title so the server updates
+        # the last cast item's title and notifies clients via playlist:updated.
+        if self._last_cast_id is not None:
+            logger.info("[set_media_title] updating last cast with title=%s", data)
+            try:
+                requests.post(
+                    WEB_RENDERER_URL,
+                    json={
+                        "url": "",
+                        "title": data,
+                        "updateLast": True,
+                    },
+                    timeout=3,
+                )
+            except Exception as e:
+                logger.warning("[set_media_title] update failed: %s", e)
 
     def set_media_stop(self):
         pass
@@ -216,11 +228,7 @@ class WebRenderer2(Renderer):
         pass
 
     def set_media_resume(self):
-        if self._pending_url:
-            logger.info("[set_media_resume] flushing pending url without title")
-            self._post_cast(self._pending_url, self._title)
-            self._pending_url = ""
-            self._title = ""
+        pass
 
     def set_media_volume(self, data):
         pass

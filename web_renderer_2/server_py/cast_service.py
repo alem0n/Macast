@@ -125,6 +125,29 @@ def find_by_id(media_id):
     return None
 
 
+def get_last_item():
+    """Return the most recently added playlist item, or None if empty."""
+    return _playlist[-1] if _playlist else None
+
+
+def update_item(media_id, **fields):
+    """Update fields on a playlist item by id. Returns the item or None."""
+    item = find_by_id(media_id)
+    if not item:
+        return None
+    item.update(fields)
+    return item
+
+
+def update_last_item(**fields):
+    """Update fields on the most recently added item. Returns the item or None."""
+    item = get_last_item()
+    if not item:
+        return None
+    item.update(fields)
+    return item
+
+
 def get_playlist():
     return list(_playlist)
 

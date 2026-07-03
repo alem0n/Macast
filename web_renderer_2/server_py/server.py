@@ -244,12 +244,33 @@ def _log(prefix, msg, *args):
 
 
 async def handle_cast_post(request):
-    """POST /api/cast — receive a cast URL."""
+    """POST /api/cast — receive a cast URL, or update the last item's title.
+
+    Body shapes:
+      {url, title?, ...}        → add new playlist item (standard cast)
+      {url: "", title, updateLast: true} → update title of the most recent
+                                          item (sent by the renderer plugin
+                                          when DLNA delivers the title late)
+    """
     try:
         body = await request.json()
     except Exception:
         _log("API", "POST /api/cast | REJECTED — invalid JSON")
         return web.json_response({'error': 'Invalid JSON'}, status=400)
+
+    # ── Late-title update path (no new playlist item) ──
+    if body.get('updateLast'):
+        new_title = body.get('title')
+        if not new_title:
+            return web.json_response({'error': 'Missing title for updateLast'},
+                                     status=400)
+        item = cast_service.update_last_item(title=new_title)
+        if not item:
+            return web.json_response({'error': 'No playlist item to update'},
+                                     status=404)
+        _log("API", "POST /api/cast | updated last item title=\"%s\"", new_title)
+        _broadcast_playlist()
+        return web.json_response({'success': True, 'media': item}, status=200)
 
     url = body.get('url', '')
     if not url:
@@ -261,25 +282,55 @@ async def handle_cast_post(request):
         _log("API", "POST /api/cast | REJECTED — invalid URL: %.80s", url)
         return web.json_response({'error': 'Invalid URL provided'}, status=400)
 
-    # ── Content-Type probe for extensionless URLs (e.g. Douyin) ──
-    mime_type = None
-    if validation.get('format') == 'unknown':
-        _log("API", "POST /api/cast | probing Content-Type for extensionless URL...")
-        mime_type = await cast_service.probe_content_type(url)
-        if mime_type:
-            _log("API", "POST /api/cast | probed Content-Type=%s", mime_type)
-        else:
-            _log("API", "POST /api/cast | Content-Type probe returned nothing")
-
     _log("API", "POST /api/cast | source=%s title=\"%s\" url=%.80s",
          body.get('source', 'dlna'), body.get('title', ''), url)
 
-    media = cast_service.add_to_playlist(body, mime_type)
+    # Add to playlist and broadcast IMMEDIATELY — do not block on the
+    # Content-Type probe. For extensionless URLs we start with format
+    # 'unknown' and refine it in the background once the HEAD probe
+    # returns. This shaves up to ~5s off first-frame for extensionless
+    # CDN links (e.g. Douyin) since the browser can begin loading right
+    # away; the probe result only updates the UI label and proxyUrl flag.
+    media = cast_service.add_to_playlist(body, None)
 
     _broadcast({'type': 'cast:new', 'payload': media})
     _broadcast_playlist()
 
+    # Background probe for extensionless URLs — updates the item in place
+    # and notifies clients via playlist:updated when finished.
+    if validation.get('format') == 'unknown':
+        asyncio.create_task(_probe_and_update(media['id'], url))
+
     return web.json_response({'success': True, 'media': media}, status=201)
+
+
+async def _probe_and_update(media_id, url):
+    """Background task: probe Content-Type then patch the playlist item."""
+    try:
+        mime_type = await cast_service.probe_content_type(url)
+        if not mime_type:
+            _log("Probe", "id=%s — no Content-Type returned", media_id)
+            return
+
+        fmt = 'unknown'
+        if 'mp4' in mime_type:
+            fmt = 'mp4'
+        elif 'webm' in mime_type:
+            fmt = 'webm'
+
+        # Extensionless URLs need the proxy to play; set it now that we
+        # know the real MIME type.
+        updates = {'mimeType': mime_type, 'format': fmt}
+        if 'proxyUrl' not in cast_service.find_by_id(media_id):
+            updates['proxyUrl'] = f'/proxy/{media_id}'
+
+        item = cast_service.update_item(media_id, **updates)
+        if item:
+            _log("Probe", "id=%s — Content-Type=%s format=%s",
+                 media_id, mime_type, fmt)
+            _broadcast_playlist()
+    except Exception as e:
+        _log("Probe", "id=%s — error: %s", media_id, e)
 
 
 async def handle_cast_get(request):
@@ -368,30 +419,32 @@ async def handle_proxy(request):
     _log("Proxy", "id=%s range=%s url=%.80s",
          media_id, range_header[:50] if range_header else '(none)', original_url)
 
+    # Forward browser-like headers to the CDN. Many CDNs (Douyin, etc.)
+    # reject requests that don't appear to come from a real browser.
+    req_headers = {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/120.0.0.0 Safari/537.36'
+        ),
+        'Referer': 'https://www.douyin.com/',
+        'Accept': '*/*',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    }
+
+    # Strategy: forward the Range header to the CDN. If the CDN supports
+    # Range (returns 206), we stream just the requested byte range —
+    # dramatically faster first-frame for large files and enables seeking.
+    # If the CDN ignores Range and returns 200 (common for Douyin-style
+    # extensionless CDN links), we fall back to streaming the full body,
+    # which the <video> element handles locally.
+    if range_header:
+        req_headers['Range'] = range_header
+        _log("Proxy", "Forwarding Range header to CDN")
+    else:
+        _log("Proxy", "No Range header — fetching full resource")
+
     try:
-        # Forward the request to the CDN with browser-like headers.
-        # Many CDNs (Douyin, etc.) reject requests that don't appear
-        # to come from a real browser (checking User-Agent, Referer, etc.)
-        #
-        # IMPORTANT: Do NOT forward the browser's Range header to the CDN.
-        # Many CDNs (especially Chinese ones like Douyin) don't support
-        # Range requests on extensionless URLs — they hang or error out.
-        # Instead we fetch the full resource and serve it with proper
-        # Content-Type. The browser's <video> element gets the full file
-        # and handles seeking locally.
-        req_headers = {
-            'User-Agent': (
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/120.0.0.0 Safari/537.36'
-            ),
-            'Referer': 'https://www.douyin.com/',
-            'Accept': '*/*',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        }
-
-        _log("Proxy", "Fetching full resource (Range header NOT forwarded) ...")
-
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         connector = aiohttp.TCPConnector(ssl=False)
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
@@ -424,9 +477,13 @@ async def handle_proxy(request):
                 if 'Content-Length' in resp.headers:
                     resp_headers['Content-Length'] = resp.headers['Content-Length']
 
+                # Use the CDN's status code: 206 for partial content when
+                # the CDN honoured the Range request, 200 otherwise.
+                response_status = resp.status if resp.status in (200, 206) else 200
+
                 # Use streaming response for large media files
                 response = web.StreamResponse(
-                    status=resp.status,
+                    status=response_status,
                     headers=resp_headers,
                 )
                 await response.prepare(request)
