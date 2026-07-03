@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/alem0n/Macast/compare/Macast-v0.9.0...Macast-v0.9.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* optimize Web Renderer 2 startup latency and remove deprecated Node.js server ([cf20ccf](https://github.com/alem0n/Macast/commit/cf20ccf75b6385fee5ce29486230a23de95b2f13))
+
 ## [0.9.0](https://github.com/alem0n/Macast/compare/Macast-v0.8.0...Macast-v0.9.0) (2026-07-03)
 
 
