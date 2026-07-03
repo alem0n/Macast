@@ -24,8 +24,7 @@ jobs:
           pip install -e . --quiet
 
       - name: Python syntax check
-        run: |
-          python -c "
+        run: python -c "
 import ast, sys, glob, os
 for f in glob.glob('**/*.py', recursive=True):
     if f.startswith('.venv') or 'vendor' in f:
