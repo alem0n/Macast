@@ -44,19 +44,44 @@ jobs:
 
       - name: install system dependencies (mpv)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $mpvUrl = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20250324/mpv-x86_64-20250324-git-44a9fe3.7z"
           $mpvDir = "bin"
           New-Item -ItemType Directory -Force -Path $mpvDir | Out-Null
-          Write-Host "Downloading mpv..."
-          Invoke-WebRequest -Uri $mpvUrl -OutFile "$mpvDir\mpv.7z" -UseBasicParsing
+
+          # Get latest release info from shinchiro/mpv-winbuild-cmake
+          Write-Host "Fetching latest mpv release info..."
+          $apiUrl = "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
+          $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ Authorization = "Bearer $env:GH_TOKEN" }
+          $tag = $release.tag_name
+          Write-Host "Latest tag: $tag"
+
+          # Find the x86_64 mpv asset (not dev, not ffmpeg)
+          $asset = $release.assets | Where-Object { $_.name -like 'mpv-x86_64-*.7z' -and $_.name -notlike 'mpv-dev-*' } | Select-Object -First 1
+          if (-not $asset) {
+            # Fallback: try dev variant
+            $asset = $release.assets | Where-Object { $_.name -like 'mpv-dev-x86_64-*.7z' } | Select-Object -First 1
+          }
+          if (-not $asset) {
+            Write-Host "ERROR: No mpv x86_64 asset found in latest release"
+            exit 1
+          }
+
+          $mpvUrl = $asset.browser_download_url
+          $mpvFile = $asset.name
+          Write-Host "Downloading $mpvFile ..."
+          Invoke-WebRequest -Uri $mpvUrl -OutFile "$mpvDir\$mpvFile" -UseBasicParsing
+
+          # Extract
+          Write-Host "Extracting $mpvFile ..."
           if (Get-Command 7z -ErrorAction SilentlyContinue) {
-            7z x "$mpvDir\mpv.7z" -o"$mpvDir\tmp" -y | Out-Null
+            7z x "$mpvDir\$mpvFile" -o"$mpvDir\tmp" -y | Out-Null
           } else {
             Write-Host "7z not found, trying tar..."
-            tar -xf "$mpvDir\mpv.7z" -C "$mpvDir\tmp" --force-local 2>$null
+            tar -xf "$mpvDir\$mpvFile" -C "$mpvDir\tmp" --force-local 2>$null
             if ($LASTEXITCODE -ne 0) {
-              Write-Host "ERROR: Cannot extract mpv.7z — install 7-Zip or pre-place mpv.exe in bin/"
+              Write-Host "ERROR: Cannot extract $mpvFile"
               exit 1
             }
           }
@@ -68,7 +93,7 @@ jobs:
             Write-Host "ERROR: mpv.exe not found in extracted archive"
             exit 1
           }
-          Remove-Item -Recurse -Force "$mpvDir\mpv.7z", "$mpvDir\tmp" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$mpvDir\$mpvFile", "$mpvDir\tmp" -ErrorAction SilentlyContinue
 
       - name: install Python dependencies
         shell: pwsh
