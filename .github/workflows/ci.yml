@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: install dependencies
+        run: |
+          python -m pip install --upgrade pip --quiet
+          pip install requests appdirs cherrypy lxml ifaddr pillow --quiet
+          pip install -e . --quiet
+
+      - name: Python syntax check
+        run: python -c "import ast, sys; [sys.exit(1) for _ in ast.parse(open(f).read()) if False] for f in __import__('glob').glob('**/*.py', recursive=True) if not f.startswith('.venv') and 'vendor' not in f; print('All files parse OK')"

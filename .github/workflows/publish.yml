@@ -1,0 +1,131 @@
+name: 'publish'
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: import windows certificate
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          try {
+            if ([string]::IsNullOrEmpty($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrEmpty($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+              Write-Host "SKIP: Windows certificate not configured"
+              exit 0
+            }
+            New-Item -ItemType Directory -Path certificate -Force | Out-Null
+            Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
+            certutil -decode certificate/tempCert.txt certificate/certificate.pfx
+            Remove-Item -path certificate -include tempCert.txt
+            Import-PfxCertificate -FilePath certificate/certificate.pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
+          } catch {
+            Write-Host "WARN: Certificate import failed: $_"
+            exit 0
+          }
+
+      - name: install system dependencies (mpv)
+        shell: pwsh
+        run: |
+          $mpvUrl = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20250324/mpv-x86_64-20250324-git-44a9fe3.7z"
+          $mpvDir = "bin"
+          New-Item -ItemType Directory -Force -Path $mpvDir | Out-Null
+          Write-Host "Downloading mpv..."
+          Invoke-WebRequest -Uri $mpvUrl -OutFile "$mpvDir\mpv.7z" -UseBasicParsing
+          if (Get-Command 7z -ErrorAction SilentlyContinue) {
+            7z x "$mpvDir\mpv.7z" -o"$mpvDir\tmp" -y | Out-Null
+          } else {
+            Write-Host "7z not found, trying tar..."
+            tar -xf "$mpvDir\mpv.7z" -C "$mpvDir\tmp" --force-local 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "ERROR: Cannot extract mpv.7z — install 7-Zip or pre-place mpv.exe in bin/"
+              exit 1
+            }
+          }
+          $mpvExe = Get-ChildItem -Recurse -Filter "mpv.exe" "$mpvDir\tmp" | Select-Object -First 1
+          if ($mpvExe) {
+            Copy-Item $mpvExe.FullName "$mpvDir\mpv.exe" -Force
+            Write-Host "mpv.exe extracted to $mpvDir\mpv.exe"
+          } else {
+            Write-Host "ERROR: mpv.exe not found in extracted archive"
+            exit 1
+          }
+          Remove-Item -Recurse -Force "$mpvDir\mpv.7z", "$mpvDir\tmp" -ErrorAction SilentlyContinue
+
+      - name: install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip --quiet
+          pip install requests appdirs cherrypy lxml ifaddr pillow pyperclip pystray pywin32 --quiet
+          pip install pyinstaller polib aiohttp --quiet
+          pip install -e $env:GITHUB_WORKSPACE --quiet
+
+      - name: compile translations (.po -> .mo)
+        shell: pwsh
+        run: |
+          $root = $env:GITHUB_WORKSPACE -replace '\\', '/'
+          python -c @"
+          import polib, pathlib
+          root = pathlib.Path(r'$root')
+          for lang in ['zh_CN', 'fi', 'it']:
+              po = polib.pofile(str(root / 'i18n' / lang / 'LC_MESSAGES' / 'macast.po'))
+              po.save_as_mofile(str(root / 'i18n' / lang / 'LC_MESSAGES' / 'macast.mo'))
+              print(f'  compiled: {lang}')
+          "@
+
+      - name: build Macast.exe (PyInstaller)
+        shell: pwsh
+        run: |
+          $pyiArgs = @(
+            "--noconfirm", "-F", "-w",
+            "--additional-hooks-dir=.",
+            "--add-data=macast/.version;.",
+            "--add-data=macast/xml;macast/xml",
+            "--add-data=i18n;i18n",
+            "--add-data=macast/assets;macast/assets",
+            "--add-binary=bin/mpv.exe;bin",
+            "--icon=macast/assets/icon.ico",
+            "Macast.py"
+          )
+          python -m PyInstaller $pyiArgs
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Macast-Windows
+          path: dist/Macast.exe
+
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
+        with:
+          name: Macast ${{ github.ref_name }}
+          body: |
+            ## Macast ${{ github.ref_name }}
+
+            See the assets below to download this version and install.
+
+            ### Windows
+            - `Macast.exe` — standalone executable (mpv bundled)
+          files: dist/Macast.exe
+          draft: false
+          prerelease: false
