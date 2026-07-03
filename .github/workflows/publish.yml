@@ -98,6 +98,27 @@ jobs:
           }
           Remove-Item -Recurse -Force "$mpvDir\$mpvFile", "$mpvDir\tmp" -ErrorAction SilentlyContinue
 
+      - name: build Web Renderer 2 (React client + staging)
+        shell: pwsh
+        run: |
+          # Build React client
+          Push-Location web_renderer_2\client
+          npm install --quiet
+          npm run build
+          Pop-Location
+
+          # Create staging directory
+          $staging = "web_renderer_2\staging"
+          if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
+          New-Item -ItemType Directory -Force -Path "$staging\server_py" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$staging\client\dist" | Out-Null
+
+          Copy-Item -Recurse "web_renderer_2\server_py\*" "$staging\server_py\"
+          Copy-Item -Recurse "web_renderer_2\client\dist\*" "$staging\client\dist\"
+          Copy-Item "web_renderer_2\macast_renderer.py" "$staging\plugin.py"
+
+          Write-Host "Web Renderer 2 staging ready at $staging" -ForegroundColor Green
+
       - name: install Python dependencies
         shell: pwsh
         run: |
@@ -122,6 +143,7 @@ jobs:
       - name: build Macast.exe (PyInstaller)
         shell: pwsh
         run: |
+          $stagingDir = "web_renderer_2\staging"
           $pyiArgs = @(
             "--noconfirm", "-F", "-w",
             "--additional-hooks-dir=.",
@@ -130,6 +152,8 @@ jobs:
             "--add-data=i18n;i18n",
             "--add-data=macast/assets;macast/assets",
             "--add-binary=bin/mpv.exe;bin",
+            "--add-data=$stagingDir;web_renderer_2_app",
+            "--hidden-import=aiohttp",
             "--icon=macast/assets/icon.ico",
             "Macast.py"
           )
