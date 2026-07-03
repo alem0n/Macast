@@ -15,5 +15,5 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v5
         with:
-          token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
+          token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           target-branch: ${{ github.ref_name }}

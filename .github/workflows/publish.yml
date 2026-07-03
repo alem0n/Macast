@@ -116,7 +116,7 @@ jobs:
       - name: create release
         uses: softprops/action-gh-release@v2
         env:
-          GITHUB_TOKEN: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.MY_RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
         with:
           name: Macast ${{ github.ref_name }}
           body: |
