@@ -1,3 +1,4 @@
+import aiohttp
 import random
 import string
 import time
@@ -47,6 +48,27 @@ def validate_url(url):
         return {'valid': False}
 
 
+async def probe_content_type(url):
+    """Send a HEAD request to probe the actual Content-Type of a URL.
+
+    Used for extensionless URLs (e.g. Douyin CDN) where the format
+    cannot be determined from the pathname alone.
+
+    Returns the MIME type string (e.g. 'video/mp4') or None.
+    """
+    try:
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.head(url, allow_redirects=True) as resp:
+                ct = resp.headers.get('Content-Type', '')
+                ct = ct.split(';')[0].strip().lower()
+                if ct and ct.startswith('video/'):
+                    return ct
+                return None
+    except Exception:
+        return None
+
+
 def extract_title(url):
     try:
         parsed = urlparse(url)
@@ -56,11 +78,19 @@ def extract_title(url):
         return '未命名视频'
 
 
-def add_to_playlist(body):
+def add_to_playlist(body, mime_type=None):
     validation = validate_url(body['url'])
     fmt = validation.get('format', 'unknown')
+    is_extensionless = (fmt == 'unknown')  # Save before mime_type override
     title = body.get('title') or extract_title(body['url'])
     mid = _generate_id()
+
+    # If HEAD probe determined the actual format, override extension-based guess
+    if mime_type:
+        if 'mp4' in mime_type:
+            fmt = 'mp4'
+        elif 'webm' in mime_type:
+            fmt = 'webm'
 
     media = {
         'id': mid,
@@ -72,8 +102,27 @@ def add_to_playlist(body):
         'source': body.get('source', 'dlna'),
     }
 
+    # Only include mimeType when we have a useful value from probing
+    if mime_type:
+        media['mimeType'] = mime_type
+
+    # Always proxy extensionless URLs — the <video> element cannot
+    # play them directly (no file extension → no MIME hint for browser).
+    # The proxy handler forwards Range requests with browser-like
+    # headers and sets Content-Type explicitly.
+    if is_extensionless:
+        media['proxyUrl'] = f'/proxy/{mid}'
+
     _playlist.append(media)
     return media
+
+
+def find_by_id(media_id):
+    """Look up a media item by its id. Returns the dict or None."""
+    for item in _playlist:
+        if item['id'] == media_id:
+            return item
+    return None
 
 
 def get_playlist():

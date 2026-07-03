@@ -132,18 +132,43 @@ Then re-run this script. Alternatively, build without mpv:
     Write-Host "[ok] mpv.exe found" -ForegroundColor Green
 }
 
-# ── check python ─────────────────────────────────────────────────────
+# ── check python (prefer 3.11.9) ──────────────────────────────────────
 
-Ensure-Command python
+# Look for Python 3.11 at well-known installation paths
+$PythonCandidatePaths = @(
+    "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+    "$env:ProgramFiles\Python311\python.exe",
+    "C:\Python311\python.exe"
+)
+$PythonExe = $null
+foreach ($p in $PythonCandidatePaths) {
+    if (Test-Path $p) { $PythonExe = $p; break }
+}
+if (-not $PythonExe -and (Get-Command python -ErrorAction SilentlyContinue)) {
+    $PythonExe = (Get-Command python).Source
+}
+if (-not $PythonExe) {
+    Write-Err "Python 3.11 not found. Install Python 3.11.9 and try again."
+    exit 1
+}
 
-$pyVer = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-Write-Host "[ok] Python $pyVer detected" -ForegroundColor Green
+$pyVer = & $PythonExe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+Write-Host "[ok] Python $pyVer detected at $PythonExe" -ForegroundColor Green
 
 # ── venv ─────────────────────────────────────────────────────────────
 
-if (-not (Test-Path (Join-Path $VenvDir "Scripts" "python.exe"))) {
-    Write-Step "Creating virtual environment..."
-    & python -m venv $VenvDir
+$VenvPython = Join-Path $VenvDir "Scripts" "python.exe"
+if (Test-Path $VenvPython) {
+    # Verify the venv's Python is functional
+    $null = & $VenvPython -c "import sys; print(sys.version)" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Venv Python is broken (old/wrong version), recreating..." -ForegroundColor Yellow
+        Remove-Item -Recurse -Force $VenvDir
+    }
+}
+if (-not (Test-Path $VenvPython)) {
+    Write-Step "Creating virtual environment (Python $pyVer)..."
+    & $PythonExe -m venv $VenvDir
 }
 
 $Python = Join-Path $VenvDir "Scripts" "python.exe"

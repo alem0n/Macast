@@ -184,7 +184,7 @@ const VideoPlayer: React.FC = () => {
         key={videoKey}
         ref={videoRef}
         className="player-video"
-        src={media?.url || ''}
+        src={media?.proxyUrl || media?.url || ''}
         preload="auto"
         autoPlay
         controls={false}

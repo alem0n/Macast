@@ -261,10 +261,20 @@ async def handle_cast_post(request):
         _log("API", "POST /api/cast | REJECTED — invalid URL: %.80s", url)
         return web.json_response({'error': 'Invalid URL provided'}, status=400)
 
+    # ── Content-Type probe for extensionless URLs (e.g. Douyin) ──
+    mime_type = None
+    if validation.get('format') == 'unknown':
+        _log("API", "POST /api/cast | probing Content-Type for extensionless URL...")
+        mime_type = await cast_service.probe_content_type(url)
+        if mime_type:
+            _log("API", "POST /api/cast | probed Content-Type=%s", mime_type)
+        else:
+            _log("API", "POST /api/cast | Content-Type probe returned nothing")
+
     _log("API", "POST /api/cast | source=%s title=\"%s\" url=%.80s",
          body.get('source', 'dlna'), body.get('title', ''), url)
 
-    media = cast_service.add_to_playlist(body)
+    media = cast_service.add_to_playlist(body, mime_type)
 
     _broadcast({'type': 'cast:new', 'payload': media})
     _broadcast_playlist()
@@ -333,6 +343,107 @@ async def handle_status(request):
         'hasMedia': len(cast_service.get_playlist()) > 0,
         'onlineCount': stats['onlineCount'],
     })
+
+
+# ── media proxy (for extensionless CDN URLs) ──────────────────────
+
+async def handle_proxy(request):
+    """GET /proxy/{media_id} — Stream media from the original CDN URL via local proxy.
+
+    This solves playback issues with CDNs that:
+    - Don't return proper Content-Type for extensionless URLs
+    - Don't support HTTP Range requests required by <video> elements
+    - Block cross-origin requests from the <video> element
+    """
+    media_id = request.match_info.get('media_id', '')
+    media = cast_service.find_by_id(media_id)
+    if not media:
+        _log("Proxy", "NOT FOUND — id=%s", media_id)
+        return web.json_response({'error': 'Media not found'}, status=404)
+
+    original_url = media['url']
+    mime_type = media.get('mimeType', 'video/mp4')
+    range_header = request.headers.get('Range', '')
+
+    _log("Proxy", "id=%s range=%s url=%.80s",
+         media_id, range_header[:50] if range_header else '(none)', original_url)
+
+    try:
+        # Forward the request to the CDN with browser-like headers.
+        # Many CDNs (Douyin, etc.) reject requests that don't appear
+        # to come from a real browser (checking User-Agent, Referer, etc.)
+        #
+        # IMPORTANT: Do NOT forward the browser's Range header to the CDN.
+        # Many CDNs (especially Chinese ones like Douyin) don't support
+        # Range requests on extensionless URLs — they hang or error out.
+        # Instead we fetch the full resource and serve it with proper
+        # Content-Type. The browser's <video> element gets the full file
+        # and handles seeking locally.
+        req_headers = {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/120.0.0.0 Safari/537.36'
+            ),
+            'Referer': 'https://www.douyin.com/',
+            'Accept': '*/*',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        }
+
+        _log("Proxy", "Fetching full resource (Range header NOT forwarded) ...")
+
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+            async with session.get(original_url, headers=req_headers) as resp:
+                _log("Proxy", "CDN response status=%s content-type=%s",
+                     resp.status, resp.headers.get('Content-Type', '?'))
+
+                # If the CDN returned an error, log and pass it through
+                if resp.status >= 400:
+                    body_preview = await resp.content.read(512)
+                    _log("Proxy", "CDN ERROR — status=%s body=%.200s",
+                         resp.status, body_preview.decode('utf-8', errors='replace'))
+                    return web.Response(
+                        status=resp.status,
+                        body=body_preview,
+                        content_type='text/plain',
+                    )
+
+                # Build response headers
+                resp_headers = {
+                    'Content-Type': mime_type,
+                    'Accept-Ranges': 'bytes',
+                }
+
+                # Pass through Content-Range (needed for proper seeking)
+                if 'Content-Range' in resp.headers:
+                    resp_headers['Content-Range'] = resp.headers['Content-Range']
+
+                # Pass through Content-Length
+                if 'Content-Length' in resp.headers:
+                    resp_headers['Content-Length'] = resp.headers['Content-Length']
+
+                # Use streaming response for large media files
+                response = web.StreamResponse(
+                    status=resp.status,
+                    headers=resp_headers,
+                )
+                await response.prepare(request)
+
+                async for chunk in resp.content.iter_chunked(65536):
+                    await response.write(chunk)
+
+                return response
+    except asyncio.CancelledError:
+        # Client disconnected — this is normal during seeking
+        raise
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        _log("Proxy", "ERROR — id=%s\n%s", media_id, tb)
+        error_msg = f'Proxy failed: {type(e).__name__}'
+        return web.json_response({'error': error_msg}, status=502)
 
 
 # ── health checker ────────────────────────────────────────────────
@@ -481,6 +592,9 @@ def create_app(static_dir):
     app.router.add_post('/api/cast/reorder', handle_cast_reorder)
     app.router.add_get('/api/users', handle_users)
     app.router.add_get('/api/status', handle_status)
+
+    # Media proxy route (serves extensionless CDN URLs with proper Content-Type)
+    app.router.add_get('/proxy/{media_id}', handle_proxy)
 
     # Root handler: WebSocket upgrade for ws://host/ (browser clients connect
     # at root with no path), or static files + SPA fallback for HTTP GET.

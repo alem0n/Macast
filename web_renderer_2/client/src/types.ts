@@ -6,6 +6,8 @@ export interface CastMedia {
   format: 'mp4' | 'webm' | 'hls' | 'dash' | 'unknown';
   castAt: string;
   source: 'dlna' | 'manual';
+  mimeType?: string;  // Actual Content-Type from server HEAD probe (for extensionless URLs like Douyin CDN)
+  proxyUrl?: string;  // Local proxy URL for extensionless URLs (/proxy/{id})
 }
 
 export interface DeviceInfo {
