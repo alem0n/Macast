@@ -24,4 +24,16 @@ jobs:
           pip install -e . --quiet
 
       - name: Python syntax check
-        run: python -c "import ast, sys; [sys.exit(1) for _ in ast.parse(open(f).read()) if False] for f in __import__('glob').glob('**/*.py', recursive=True) if not f.startswith('.venv') and 'vendor' not in f; print('All files parse OK')"
+        run: |
+          python -c "
+import ast, sys, glob, os
+for f in glob.glob('**/*.py', recursive=True):
+    if f.startswith('.venv') or 'vendor' in f:
+        continue
+    try:
+        ast.parse(open(f, encoding='utf-8').read())
+    except SyntaxError as e:
+        print(f'SYNTAX ERROR in {f}: {e}')
+        sys.exit(1)
+print('All files parse OK')
+"
